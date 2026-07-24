@@ -1,0 +1,800 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Munich Weather — Glitch Studio</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #111;
+    --panel: #1b1b1b;
+    --ink: #eee;
+    --muted: #888;
+    --accent: #ff4d4d;
+    --border: #2a2a2a;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 13px/1.4 -apple-system, "Helvetica Neue", sans-serif;
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    grid-template-rows: 100vh;
+    overflow: hidden;
+  }
+  #canvas-wrap {
+    background: #0a0a0a;
+    padding: 24px;
+    overflow: auto;
+    position: relative;
+    cursor: grab;
+    user-select: none;
+  }
+  #canvas-wrap.dragging { cursor: grabbing; }
+  #canvas {
+    width: fit-content;
+    margin: 0 auto;
+    background: #EAEAEA;
+    box-shadow: 0 4px 40px rgba(0,0,0,.5);
+  }
+  #canvas svg {
+    display: block;
+    width: var(--zoom-width, 900px);
+    height: auto;
+  }
+  #zoom-toolbar {
+    position: fixed;
+    left: 20px;
+    top: 20px;
+    display: flex;
+    gap: 4px;
+    background: rgba(30,30,30,.9);
+    backdrop-filter: blur(10px);
+    padding: 6px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    z-index: 10;
+  }
+  #zoom-toolbar button {
+    background: transparent;
+    border: none;
+    color: var(--ink);
+    width: 32px;
+    height: 32px;
+    cursor: pointer;
+    font: inherit;
+    font-size: 16px;
+    border-radius: 3px;
+  }
+  #zoom-toolbar button:hover { background: #333; }
+  #zoom-toolbar .zoom-val {
+    color: var(--muted);
+    font-size: 11px;
+    padding: 0 8px;
+    align-self: center;
+    min-width: 40px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  #sidebar {
+    background: var(--panel);
+    border-left: 1px solid var(--border);
+    padding: 20px;
+    overflow-y: auto;
+  }
+  h1 {
+    font-size: 15px;
+    margin: 0 0 4px;
+    letter-spacing: .5px;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 11px;
+    margin-bottom: 24px;
+    letter-spacing: .3px;
+  }
+  .section {
+    margin-bottom: 24px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section:last-child { border: none; }
+  label {
+    display: block;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .styles {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .style-btn {
+    background: #262626;
+    border: 1px solid var(--border);
+    color: var(--ink);
+    padding: 8px 10px;
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+    border-radius: 3px;
+    transition: all .1s;
+  }
+  .style-btn:hover { background: #2f2f2f; }
+  .style-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #000;
+    font-weight: 600;
+  }
+  input[type=range] {
+    width: 100%;
+    accent-color: var(--accent);
+  }
+  .row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+  }
+  .value {
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+  }
+  button.action {
+    width: 100%;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--ink);
+    padding: 10px;
+    cursor: pointer;
+    font: inherit;
+    border-radius: 3px;
+    margin-top: 6px;
+    transition: all .1s;
+  }
+  button.action:hover { background: #262626; border-color: #444; }
+  button.action.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #000;
+    font-weight: 600;
+  }
+  button.action.primary:hover { background: #ff6666; border-color: #ff6666; }
+  .hint {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 12px;
+    line-height: 1.5;
+  }
+  .swatch-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .swatch-row label {
+    margin: 0;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--ink);
+    font-size: 12px;
+  }
+  input[type=color] {
+    width: 36px;
+    height: 24px;
+    border: 1px solid var(--border);
+    background: transparent;
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 3px;
+  }
+  #loading {
+    color: var(--muted);
+    font-size: 12px;
+    text-align: center;
+    padding: 40px;
+  }
+</style>
+</head>
+<body>
+
+<div id="canvas-wrap">
+  <div id="zoom-toolbar">
+    <button id="zoom-out" title="Zoom out">−</button>
+    <span class="zoom-val" id="zoom-val">100%</span>
+    <button id="zoom-in" title="Zoom in">+</button>
+    <button id="zoom-fit" title="Fit to screen" style="width:auto;padding:0 8px;font-size:11px">FIT</button>
+    <button id="zoom-100" title="Actual size" style="width:auto;padding:0 8px;font-size:11px">1:1</button>
+  </div>
+  <div id="canvas"><div id="loading">Loading chart…</div></div>
+</div>
+
+<aside id="sidebar">
+  <h1>MUNICH · GLITCH STUDIO</h1>
+  <div class="subtitle">21 years of daily weather · vectors intact</div>
+
+  <div class="section">
+    <label>Style</label>
+    <div class="styles" id="style-buttons">
+      <button class="style-btn active" data-style="none">None</button>
+      <button class="style-btn" data-style="displace">Displace</button>
+      <button class="style-btn" data-style="slice">Slice</button>
+      <button class="style-btn" data-style="rgb">RGB Split</button>
+      <button class="style-btn" data-style="noise">Noise</button>
+      <button class="style-btn" data-style="blocks">Blocks</button>
+      <button class="style-btn" data-style="streak">Streak</button>
+      <button class="style-btn" data-style="wash">Washed</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="row"><label style="margin:0">Intensity</label><span class="value" id="intensity-val">40</span></div>
+    <input type="range" id="intensity" min="0" max="100" value="40" />
+
+    <div class="row" style="margin-top:16px"><label style="margin:0">Scale</label><span class="value" id="scale-val">50</span></div>
+    <input type="range" id="scale" min="1" max="100" value="50" />
+    <div class="hint" style="margin-top:6px">Intensity = strength · Scale = grain size of the effect</div>
+  </div>
+
+  <div class="section">
+    <label>Frame</label>
+    <div class="swatch-row"><label>Page background</label><input type="color" id="c-page" value="#eaeaea"></div>
+    <div class="swatch-row"><label>Panel background</label><input type="color" id="c-panel" value="#fbfbfb"></div>
+    <div class="swatch-row"><label>Grid + marker</label><input type="color" id="c-grid" value="#333333"></div>
+
+    <div class="row" style="margin-top:12px"><label style="margin:0">Grid + marker thickness</label><span class="value" id="gridw-val">0.10</span></div>
+    <input type="range" id="gridw" min="0" max="60" step="1" value="1" />
+    <div class="hint" style="margin-top:6px">Also drives the black stroke on the seasonal mean markers.</div>
+  </div>
+
+  <div class="section">
+    <label>Dots — colour</label>
+    <div class="swatch-row"><label>Spring</label><input type="color" id="c-spring" value="#11bb44"></div>
+    <div class="swatch-row"><label>Summer</label><input type="color" id="c-summer" value="#ffbb00"></div>
+    <div class="swatch-row"><label>Autumn</label><input type="color" id="c-autumn" value="#ee4444"></div>
+    <div class="swatch-row"><label>Winter</label><input type="color" id="c-winter" value="#4488ff"></div>
+
+    <div class="row" style="margin-top:12px"><label style="margin:0">Dot opacity</label><span class="value" id="alpha-val">35</span></div>
+    <input type="range" id="alpha" min="1" max="100" value="35" />
+  </div>
+
+  <div class="section">
+    <button class="action" id="randomize">Re-seed noise</button>
+    <button class="action" id="reset">Reset</button>
+  </div>
+
+  <div class="section">
+    <button class="action primary" id="export-svg">Export SVG</button>
+    <button class="action" id="export-png">Export PNG</button>
+    <div class="hint">
+      The exported SVG contains real filter primitives — open it in Illustrator or Inkscape.
+      For PDF, use <b>File → Save As → PDF</b> in Illustrator, or Preview's Export menu on macOS.
+    </div>
+  </div>
+</aside>
+
+<script>
+const SVG_URL = "munich_by_year.svg";
+const canvas = document.getElementById("canvas");
+let svgEl = null;
+let contentGroup = null;   // wrapper we apply the filter to
+let filterDefs = null;
+let state = { style: "none", intensity: 40, scale: 50, seed: 3 };
+
+async function loadSvg() {
+  let text;
+  try {
+    const res = await fetch(SVG_URL);
+    if (!res.ok) throw new Error(res.status);
+    text = await res.text();
+  } catch (e) {
+    canvas.innerHTML = `<div style="padding:40px;color:#c66;font-size:13px;line-height:1.6">
+      <b>Can't load ${SVG_URL}</b><br><br>
+      This page must be served over http, not opened as a file.<br><br>
+      In Terminal, run:<br>
+      <code style="display:block;padding:8px 12px;background:#222;margin:8px 0;border-radius:3px;color:#8f8">cd ~/Desktop/munich-weather && python3 -m http.server 8000</code>
+      Then open <b>http://localhost:8000/glitch.html</b>
+    </div>`;
+    return;
+  }
+
+  const doc = new DOMParser().parseFromString(text, "image/svg+xml");
+  svgEl = doc.documentElement;
+
+  // Strip fixed dimensions so it scales into the canvas
+  svgEl.removeAttribute("width");
+  svgEl.removeAttribute("height");
+  svgEl.setAttribute("preserveAspectRatio", "xMidYMid meet");
+
+  // Wrap all direct children (except <defs>) in a group we can filter
+  const defs = svgEl.querySelector("defs") || (() => {
+    const d = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+    svgEl.insertBefore(d, svgEl.firstChild);
+    return d;
+  })();
+
+  contentGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  contentGroup.setAttribute("id", "glitch-target");
+  const nodes = Array.from(svgEl.childNodes).filter(n => n !== defs);
+  nodes.forEach(n => contentGroup.appendChild(n));
+  svgEl.appendChild(contentGroup);
+
+  // Inject our filter defs
+  filterDefs = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  filterDefs.setAttribute("id", "glitch-filters");
+  defs.appendChild(filterDefs);
+
+  canvas.innerHTML = "";
+  canvas.appendChild(svgEl);
+
+  tagSeasonElements();
+  ensureFrameStyleEl();
+  applyPalette();
+  applyFrame();
+  applyFilter();
+}
+
+// ---- frame / typography ----
+let frameStyleEl = null;
+const FONT_STACK = '"UniversLTStd-LightCn", "Univers LT Std 47 Light Cn", ' +
+                   '"Univers 47 Condensed", "Univers", ' +
+                   '"Helvetica Neue Condensed", "Helvetica Neue", sans-serif';
+
+function ensureFrameStyleEl() {
+  if (frameStyleEl || !svgEl) return;
+  frameStyleEl = document.createElementNS("http://www.w3.org/2000/svg", "style");
+  svgEl.insertBefore(frameStyleEl, svgEl.firstChild);
+}
+
+function applyFrame() {
+  if (!frameStyleEl) return;
+  const page  = document.getElementById("c-page").value;
+  const panel = document.getElementById("c-panel").value;
+  const grid  = document.getElementById("c-grid").value;
+  const gw    = (+document.getElementById("gridw").value / 10).toFixed(2); // 0-6
+  document.getElementById("gridw-val").textContent = gw;
+
+  frameStyleEl.textContent = `
+    text { font-family: ${FONT_STACK}; font-weight: 300; }
+    [id="page-bg"] path  { fill: ${page}  !important; }
+    [id="panel-bg"] path { fill: ${panel} !important; }
+    [id="gridline"] path { stroke: ${grid} !important; stroke-width: ${gw}px !important; }
+    [id="title-label"] path { fill: none !important; }
+    [data-role="marker-source"] { stroke-width: ${gw}px !important; }
+    [id^="xtick_"] > [id^="line2d_"],
+    [id^="ytick_"] > [id^="line2d_"] { display: none; }
+  `;
+}
+
+// ---- season-dot palette ----
+const SEASON_HEX = {
+  spring: "#11bb44", summer: "#ffbb00",
+  autumn: "#ee4444", winter: "#4488ff",
+};
+let paletteStyleEl = null;
+
+function normaliseColor(raw) {
+  if (!raw) return null;
+  raw = raw.trim().toLowerCase();
+  if (raw.startsWith("#")) {
+    if (raw.length === 4) raw = "#" + raw[1]+raw[1]+raw[2]+raw[2]+raw[3]+raw[3];
+    return raw;
+  }
+  const m = /rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/.exec(raw);
+  if (m) return "#" + [+m[1],+m[2],+m[3]].map(n =>
+    n.toString(16).padStart(2,"0")).join("");
+  return null;
+}
+
+function extractFill(el) {
+  const style = el.getAttribute("style");
+  if (style) {
+    const m = /(?:^|;)\s*fill\s*:\s*([^;]+)/i.exec(style);
+    if (m) return normaliseColor(m[1]);
+  }
+  const attr = el.getAttribute("fill");
+  return attr ? normaliseColor(attr) : null;
+}
+
+function tagSeasonElements() {
+  if (!svgEl) return;
+  const lookup = {};
+  for (const s in SEASON_HEX) lookup[SEASON_HEX[s]] = s;
+  const all = svgEl.querySelectorAll("*");
+  for (const el of all) {
+    const fill = extractFill(el);
+    if (fill && lookup[fill]) {
+      el.setAttribute("data-season", lookup[fill]);
+    }
+  }
+  if (!paletteStyleEl) {
+    paletteStyleEl = document.createElementNS(
+      "http://www.w3.org/2000/svg", "style");
+    svgEl.insertBefore(paletteStyleEl, svgEl.firstChild);
+  }
+  tagMarkerSources();
+}
+
+function tagMarkerSources() {
+  // <use> inherits attributes from its target <path> in <defs>. To change
+  // the marker stroke-width we must tag the source path itself.
+  const seen = new Set();
+  for (const g of svgEl.querySelectorAll('[id="mean-cross"], [id="mean-outline"]')) {
+    const role = g.id === "mean-cross" ? "marker-source" : "marker-source";
+    for (const u of g.querySelectorAll("use")) {
+      const href = u.getAttribute("xlink:href") || u.getAttribute("href");
+      if (!href || seen.has(href)) continue;
+      seen.add(href);
+      const src = svgEl.querySelector(href);
+      if (src) src.setAttribute("data-role", role);
+    }
+  }
+}
+
+function applyPalette() {
+  if (!paletteStyleEl) return;
+  const alpha = (+document.getElementById("alpha").value / 100).toFixed(2);
+  const c = {
+    spring: document.getElementById("c-spring").value,
+    summer: document.getElementById("c-summer").value,
+    autumn: document.getElementById("c-autumn").value,
+    winter: document.getElementById("c-winter").value,
+  };
+  paletteStyleEl.textContent = Object.entries(c).map(([s, hex]) => `
+    [data-season="${s}"] {
+      fill: ${hex} !important;
+      stroke: ${hex} !important;
+      fill-opacity: ${alpha} !important;
+      stroke-opacity: ${alpha} !important;
+    }
+  `).join("\n");
+}
+
+function buildFilter() {
+  const NS = "http://www.w3.org/2000/svg";
+  const { style, intensity, scale, seed } = state;
+
+  // Clear previous filter
+  filterDefs.textContent = "";
+
+  if (style === "none" || intensity === 0) {
+    contentGroup.removeAttribute("filter");
+    return;
+  }
+
+  const filter = document.createElementNS(NS, "filter");
+  filter.setAttribute("id", "glitch");
+  filter.setAttribute("x", "-10%");
+  filter.setAttribute("y", "-10%");
+  filter.setAttribute("width", "120%");
+  filter.setAttribute("height", "120%");
+  filter.setAttribute("filterUnits", "objectBoundingBox");
+
+  const add = (tag, attrs) => {
+    const el = document.createElementNS(NS, tag);
+    for (const k in attrs) el.setAttribute(k, attrs[k]);
+    filter.appendChild(el);
+    return el;
+  };
+
+  const i = intensity / 100;   // 0-1
+  const s = scale / 100;       // 0-1
+
+  if (style === "displace") {
+    add("feTurbulence", {
+      type: "fractalNoise",
+      baseFrequency: (0.005 + s * 0.05).toFixed(4),
+      numOctaves: "2", seed: seed, result: "noise",
+    });
+    add("feDisplacementMap", {
+      in: "SourceGraphic", in2: "noise",
+      scale: (i * 60).toFixed(1),
+      xChannelSelector: "R", yChannelSelector: "G",
+    });
+  }
+
+  else if (style === "slice") {
+    // horizontal bands: noise only in Y direction
+    add("feTurbulence", {
+      type: "fractalNoise",
+      baseFrequency: `0 ${(0.01 + s * 0.15).toFixed(4)}`,
+      numOctaves: "1", seed: seed, result: "noise",
+    });
+    add("feDisplacementMap", {
+      in: "SourceGraphic", in2: "noise",
+      scale: (i * 120).toFixed(1),
+      xChannelSelector: "R", yChannelSelector: "A",
+    });
+  }
+
+  else if (style === "rgb") {
+    // chromatic aberration: split into R, G, B channels and offset
+    const off = (i * 20).toFixed(1);
+    add("feColorMatrix", { in: "SourceGraphic",
+      values: "1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0", result: "R" });
+    add("feColorMatrix", { in: "SourceGraphic",
+      values: "0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0", result: "G" });
+    add("feColorMatrix", { in: "SourceGraphic",
+      values: "0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0", result: "B" });
+    add("feOffset", { in: "R", dx: `-${off}`, dy: "0", result: "Ro" });
+    add("feOffset", { in: "B", dx: off, dy: "0", result: "Bo" });
+    add("feBlend", { in: "Ro", in2: "G", mode: "screen", result: "RG" });
+    add("feBlend", { in: "RG", in2: "Bo", mode: "screen" });
+  }
+
+  else if (style === "noise") {
+    add("feTurbulence", {
+      type: "fractalNoise",
+      baseFrequency: (0.4 + s * 1.5).toFixed(3),
+      numOctaves: "2", seed: seed, result: "noise",
+    });
+    add("feColorMatrix", { in: "noise",
+      values: `0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 ${(i * 0.5).toFixed(2)} 0`,
+      result: "noiseA" });
+    add("feComposite", { in: "noiseA", in2: "SourceGraphic",
+      operator: "in", result: "cropped" });
+    add("feBlend", { in: "SourceGraphic", in2: "cropped", mode: "multiply" });
+  }
+
+  else if (style === "streak") {
+    // vertical drip: pixels dragged downward along vertical noise stripes
+    add("feTurbulence", {
+      type: "fractalNoise",
+      baseFrequency: `${(0.05 + s * 0.3).toFixed(3)} 0.005`,
+      numOctaves: "2", seed: seed, result: "noise",
+    });
+    add("feDisplacementMap", {
+      in: "SourceGraphic", in2: "noise",
+      scale: (i * 200).toFixed(1),
+      xChannelSelector: "A", yChannelSelector: "R",
+    });
+  }
+
+  else if (style === "wash") {
+    // Washed / smeared:  each dark pixel gets pulled into a tall vertical bar,
+    // then wobbled + coloured. On a sparse chart the streaks become the subject.
+    const stretch = 4 + i * 80;                    // vertical dilation, big
+    add("feMorphology", {
+      in: "SourceGraphic", operator: "dilate",
+      radius: `0.5 ${stretch.toFixed(1)}`, result: "bars",
+    });
+    // wobble the bars horizontally so they read as drips, not perfect lines
+    add("feTurbulence", {
+      type: "fractalNoise",
+      baseFrequency: `${(0.02 + s * 0.15).toFixed(3)} 0.002`,
+      numOctaves: "2", seed: seed, result: "noise",
+    });
+    add("feDisplacementMap", {
+      in: "bars", in2: "noise",
+      scale: (5 + i * 30).toFixed(1),
+      xChannelSelector: "R", yChannelSelector: "A", result: "drips",
+    });
+    // Multiply source over the drips so text/lines stay legible on top
+    add("feBlend", {
+      in: "SourceGraphic", in2: "drips", mode: "multiply",
+    });
+  }
+
+  else if (style === "blocks") {
+    // low-frequency displacement = big rectangular offsets
+    add("feTurbulence", {
+      type: "turbulence",
+      baseFrequency: (0.005 + s * 0.03).toFixed(4),
+      numOctaves: "1", seed: seed, result: "noise",
+    });
+    add("feDisplacementMap", {
+      in: "SourceGraphic", in2: "noise",
+      scale: (i * 100).toFixed(1),
+      xChannelSelector: "R", yChannelSelector: "G",
+    });
+  }
+
+  filterDefs.appendChild(filter);
+  contentGroup.setAttribute("filter", "url(#glitch)");
+}
+
+function applyFilter() {
+  if (!svgEl) return;
+  buildFilter();
+}
+
+// ---- UI wiring ----
+document.querySelectorAll(".style-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".style-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    state.style = btn.dataset.style;
+    applyFilter();
+  });
+});
+
+const intensityInput = document.getElementById("intensity");
+const intensityVal = document.getElementById("intensity-val");
+intensityInput.addEventListener("input", e => {
+  state.intensity = +e.target.value;
+  intensityVal.textContent = state.intensity;
+  applyFilter();
+});
+
+const scaleInput = document.getElementById("scale");
+const scaleVal = document.getElementById("scale-val");
+scaleInput.addEventListener("input", e => {
+  state.scale = +e.target.value;
+  scaleVal.textContent = state.scale;
+  applyFilter();
+});
+
+["c-spring","c-summer","c-autumn","c-winter"].forEach(id => {
+  document.getElementById(id).addEventListener("input", applyPalette);
+});
+["c-page","c-panel","c-grid","gridw"].forEach(id => {
+  document.getElementById(id).addEventListener("input", applyFrame);
+});
+const alphaInput = document.getElementById("alpha");
+const alphaVal = document.getElementById("alpha-val");
+alphaInput.addEventListener("input", e => {
+  alphaVal.textContent = e.target.value;
+  applyPalette();
+});
+
+document.getElementById("randomize").addEventListener("click", () => {
+  state.seed = Math.floor(Math.random() * 1000);
+  applyFilter();
+});
+
+document.getElementById("reset").addEventListener("click", () => {
+  state = { style: "none", intensity: 40, scale: 50, seed: 3 };
+  document.querySelectorAll(".style-btn").forEach(b => {
+    b.classList.toggle("active", b.dataset.style === "none");
+  });
+  intensityInput.value = 40; intensityVal.textContent = 40;
+  scaleInput.value = 50; scaleVal.textContent = 50;
+  for (const s in SEASON_HEX) document.getElementById("c-" + s).value = SEASON_HEX[s];
+  alphaInput.value = 35; alphaVal.textContent = 35;
+  document.getElementById("c-page").value  = "#eaeaea";
+  document.getElementById("c-panel").value = "#fbfbfb";
+  document.getElementById("c-grid").value  = "#333333";
+  document.getElementById("gridw").value   = 1;
+  applyPalette();
+  applyFrame();
+  applyFilter();
+});
+
+document.getElementById("export-svg").addEventListener("click", () => {
+  if (!svgEl) return;
+  const clone = svgEl.cloneNode(true);
+  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  const source = new XMLSerializer().serializeToString(clone);
+  const blob = new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n', source],
+                        { type: "image/svg+xml" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `munich_glitch_${state.style}_${state.intensity}.svg`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById("export-png").addEventListener("click", async () => {
+  if (!svgEl) return;
+  const clone = svgEl.cloneNode(true);
+  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  const vb = svgEl.viewBox.baseVal;
+  const w = vb.width || 2000, h = vb.height || 2500;
+  const source = new XMLSerializer().serializeToString(clone);
+  const svgBlob = new Blob([source], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(svgBlob);
+  const img = new Image();
+  img.onload = () => {
+    const scale = 2;
+    const c = document.createElement("canvas");
+    c.width = w * scale; c.height = h * scale;
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = "#EAEAEA";
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(img, 0, 0, c.width, c.height);
+    c.toBlob(blob => {
+      const pngUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = pngUrl;
+      a.download = `munich_glitch_${state.style}_${state.intensity}.png`;
+      a.click();
+      URL.revokeObjectURL(pngUrl);
+    }, "image/png");
+    URL.revokeObjectURL(url);
+  };
+  img.src = url;
+});
+
+// ---- zoom controls ----
+const canvasWrap = document.getElementById("canvas-wrap");
+const zoomVal = document.getElementById("zoom-val");
+let currentZoom = 1;      // 1 = fit-to-height
+let naturalW = 900;       // updated after SVG loads
+
+function applyZoom() {
+  const w = naturalW * currentZoom;
+  canvas.style.setProperty("--zoom-width", w + "px");
+  zoomVal.textContent = Math.round(currentZoom * 100) + "%";
+}
+
+function fitToScreen() {
+  if (!svgEl) return;
+  const vb = svgEl.viewBox.baseVal;
+  if (!vb.width || !vb.height) return;
+  const aspect = vb.width / vb.height;
+  const availW = Math.max(400, canvasWrap.clientWidth - 48);
+  const availH = Math.max(400, canvasWrap.clientHeight - 48);
+  naturalW = Math.max(300, Math.min(availH * aspect, availW));
+  currentZoom = 1;
+  applyZoom();
+}
+
+document.getElementById("zoom-in").addEventListener("click", () => {
+  currentZoom = Math.min(6, currentZoom * 1.25); applyZoom();
+});
+document.getElementById("zoom-out").addEventListener("click", () => {
+  currentZoom = Math.max(0.2, currentZoom / 1.25); applyZoom();
+});
+document.getElementById("zoom-fit").addEventListener("click", fitToScreen);
+document.getElementById("zoom-100").addEventListener("click", () => {
+  if (!svgEl) return;
+  const vb = svgEl.viewBox.baseVal;
+  naturalW = vb.width;
+  currentZoom = 1;
+  applyZoom();
+});
+
+// Wheel = zoom around the cursor position
+canvasWrap.addEventListener("wheel", e => {
+  e.preventDefault();
+  const rect = canvasWrap.getBoundingClientRect();
+  const cx = e.clientX - rect.left + canvasWrap.scrollLeft;
+  const cy = e.clientY - rect.top  + canvasWrap.scrollTop;
+  const before = currentZoom;
+  const delta = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+  currentZoom = Math.max(0.2, Math.min(8, currentZoom * delta));
+  applyZoom();
+  const ratio = currentZoom / before;
+  canvasWrap.scrollLeft = cx * ratio - (e.clientX - rect.left);
+  canvasWrap.scrollTop  = cy * ratio - (e.clientY - rect.top);
+}, { passive: false });
+
+// Grab-to-pan (drag anywhere on the artboard)
+let pan = null;
+canvasWrap.addEventListener("mousedown", e => {
+  if (e.button !== 0) return;
+  pan = {
+    x: e.clientX, y: e.clientY,
+    sl: canvasWrap.scrollLeft, st: canvasWrap.scrollTop,
+  };
+  canvasWrap.classList.add("dragging");
+});
+window.addEventListener("mousemove", e => {
+  if (!pan) return;
+  canvasWrap.scrollLeft = pan.sl - (e.clientX - pan.x);
+  canvasWrap.scrollTop  = pan.st - (e.clientY - pan.y);
+});
+window.addEventListener("mouseup", () => {
+  pan = null;
+  canvasWrap.classList.remove("dragging");
+});
+
+window.addEventListener("resize", () => { if (svgEl) fitToScreen(); });
+
+(async () => {
+  await loadSvg();
+  // wait 2 frames for layout to settle, then fit
+  requestAnimationFrame(() => requestAnimationFrame(fitToScreen));
+})();
+</script>
+</body>
+</html>

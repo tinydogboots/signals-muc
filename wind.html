@@ -1,0 +1,1134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Munich — Wind Field</title>
+<style>
+  :root {
+    --bg: #111;
+    --panel: #1b1b1b;
+    --ink: #eee;
+    --muted: #888;
+    --accent: #6cf;
+    --border: #2a2a2a;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 13px/1.4 -apple-system, "Helvetica Neue", sans-serif;
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    grid-template-rows: 100vh;
+    overflow: hidden;
+  }
+  #canvas-wrap {
+    background: #0a0a0a;
+    padding: 24px;
+    overflow: auto;
+    position: relative;
+    cursor: grab;
+    user-select: none;
+  }
+  #canvas-wrap.dragging { cursor: grabbing; }
+  #canvas {
+    width: fit-content;
+    margin: 0 auto;
+    background: #f2f2f0;
+    box-shadow: 0 4px 40px rgba(0,0,0,.5);
+    position: relative;
+  }
+  #canvas svg { display: block; width: var(--zoom-width, 900px); height: auto; }
+
+  #drop-hint {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: #777; font-size: 14px; pointer-events: none;
+    text-align: center; padding: 40px; line-height: 1.7;
+  }
+  #canvas.has-elevation #drop-hint { display: none; }
+  body.drag-over #canvas {
+    outline: 2px dashed var(--accent); outline-offset: -12px;
+  }
+
+  #zoom-toolbar {
+    position: fixed; left: 20px; top: 20px;
+    display: flex; gap: 4px;
+    background: rgba(30,30,30,.9); backdrop-filter: blur(10px);
+    padding: 6px; border-radius: 6px; border: 1px solid var(--border);
+    z-index: 10;
+  }
+  #zoom-toolbar button {
+    background: transparent; border: none; color: var(--ink);
+    width: 32px; height: 32px; cursor: pointer;
+    font: inherit; font-size: 16px; border-radius: 3px;
+  }
+  #zoom-toolbar button:hover { background: #333; }
+  #zoom-toolbar .zoom-val {
+    color: var(--muted); font-size: 11px;
+    padding: 0 8px; align-self: center;
+    min-width: 40px; text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  #sidebar {
+    background: var(--panel); border-left: 1px solid var(--border);
+    padding: 20px; overflow-y: auto;
+  }
+  h1 { font-size: 15px; margin: 0 0 4px; letter-spacing: .5px; }
+  .subtitle {
+    color: var(--muted); font-size: 11px;
+    margin-bottom: 24px; letter-spacing: .3px;
+  }
+  .section {
+    margin-bottom: 22px; padding-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section:last-child { border: none; }
+  label {
+    display: block; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 1px; color: var(--muted); margin-bottom: 8px;
+  }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  input[type=color] {
+    width: 36px; height: 24px; border: 1px solid var(--border);
+    background: transparent; cursor: pointer; padding: 2px; border-radius: 3px;
+  }
+  .row {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 4px;
+  }
+  .value {
+    color: var(--ink); font-variant-numeric: tabular-nums; font-size: 12px;
+  }
+  button.action, label.action {
+    display: block; width: 100%;
+    background: transparent; border: 1px solid var(--border);
+    color: var(--ink); padding: 10px;
+    cursor: pointer; font: inherit;
+    border-radius: 3px; margin-top: 6px;
+    text-align: center;
+    transition: background .1s, border-color .1s;
+  }
+  button.action:hover, label.action:hover {
+    background: #262626; border-color: #444;
+  }
+  button.action.primary {
+    background: var(--accent); border-color: var(--accent);
+    color: #000; font-weight: 600;
+  }
+  button.action.primary:hover { background: #85e6ff; border-color: #85e6ff; }
+  .hint {
+    font-size: 11px; color: var(--muted);
+    margin-top: 12px; line-height: 1.5;
+  }
+  input[type="file"] { display: none; }
+  .swatch-row {
+    display: grid; grid-template-columns: 1fr auto;
+    align-items: center; gap: 8px; margin-bottom: 6px;
+  }
+  .swatch-row label {
+    margin: 0; text-transform: none; letter-spacing: 0;
+    color: var(--ink); font-size: 12px;
+  }
+  #meta {
+    font-size: 10px; color: var(--muted);
+    line-height: 1.6; margin-top: 8px;
+  }
+
+  /* --- compass --- */
+  .compass-wrap {
+    display: flex; align-items: center; gap: 16px;
+    margin-top: 4px;
+  }
+  #compass {
+    width: 130px; height: 130px;
+    cursor: grab;
+    flex-shrink: 0;
+  }
+  #compass.dragging { cursor: grabbing; }
+  .compass-meta {
+    flex: 1;
+    display: flex; flex-direction: column;
+    gap: 8px;
+  }
+  #compass-deg {
+    font-size: 22px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: .5px;
+    color: var(--accent);
+  }
+  #compass-card {
+    font-size: 10px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 2px;
+  }
+</style>
+</head>
+<body>
+
+<div id="canvas-wrap">
+  <div id="zoom-toolbar">
+    <button id="zoom-out" title="Zoom out">−</button>
+    <span class="zoom-val" id="zoom-val">100%</span>
+    <button id="zoom-in" title="Zoom in">+</button>
+    <button id="zoom-fit" style="width:auto;padding:0 8px;font-size:11px">FIT</button>
+    <button id="zoom-100" style="width:auto;padding:0 8px;font-size:11px">1:1</button>
+  </div>
+  <div id="canvas">
+    <div id="drop-hint">
+      Drop an <b>SVG, PNG or JPG</b> here<br>
+      <span style="color:#555;font-size:12px">
+        White = open flow area &nbsp;·&nbsp; Black = obstacle
+      </span>
+    </div>
+  </div>
+</div>
+
+<aside id="sidebar">
+  <h1>MUNICH · WIND FIELD</h1>
+  <div class="subtitle">Compass-driven flow · obstacles from image alpha</div>
+
+  <div class="section">
+    <label>Artboard</label>
+    <label class="action" for="file-elev">Load SVG / PNG / JPG</label>
+    <input type="file" id="file-elev" accept="image/svg+xml,image/png,image/jpeg,image/*,.svg" />
+    <button class="action" id="clear-elev">Clear</button>
+    <div class="hint">Black pixels become obstacles the wind curves around. White is open flow area.</div>
+  </div>
+
+  <div class="section">
+    <label>Wind direction</label>
+    <div class="compass-wrap">
+      <svg id="compass" viewBox="-50 -50 100 100">
+        <circle cx="0" cy="0" r="46" fill="#111" stroke="#333" stroke-width="1"/>
+        <g stroke="#333" stroke-width="0.5">
+          <line x1="0" y1="-46" x2="0" y2="-42"/>
+          <line x1="46" y1="0" x2="42" y2="0"/>
+          <line x1="0" y1="46" x2="0" y2="42"/>
+          <line x1="-46" y1="0" x2="-42" y2="0"/>
+        </g>
+        <g fill="#666" font-size="7" font-family="sans-serif" text-anchor="middle">
+          <text x="0" y="-32">N</text>
+          <text x="32" y="3">E</text>
+          <text x="0" y="38">S</text>
+          <text x="-32" y="3">W</text>
+        </g>
+        <g id="compass-needle" transform="rotate(270)">
+          <line x1="0" y1="0" x2="0" y2="-38" stroke="#6cf" stroke-width="2.5"/>
+          <polygon points="0,-42 -4,-32 4,-32" fill="#6cf"/>
+          <circle cx="0" cy="8" r="3" fill="#6cf" opacity="0.5"/>
+        </g>
+        <circle cx="0" cy="0" r="3" fill="#0a0a0a" stroke="#6cf" stroke-width="1"/>
+      </svg>
+      <div class="compass-meta">
+        <div id="compass-deg">270°</div>
+        <div id="compass-card">from West</div>
+      </div>
+    </div>
+    <div class="hint">The needle points where the wind comes FROM. Drag it around or type a degree.</div>
+  </div>
+
+  <div class="section">
+    <div class="row"><label style="margin:0">Density</label><span class="value" id="density-val">6000</span></div>
+    <input type="range" id="density" min="6000" max="80000" step="500" value="6000" />
+
+    <div class="row" style="margin-top:14px"><label style="margin:0">Arrow size</label><span class="value" id="size-val">22</span></div>
+    <input type="range" id="size" min="4" max="80" step="1" value="22" />
+
+    <div class="row" style="margin-top:14px"><label style="margin:0">Stroke thickness</label><span class="value" id="stroke-val">2</span></div>
+    <input type="range" id="stroke" min="1" max="120" step="1" value="20" />
+
+    <div class="row" style="margin-top:14px"><label style="margin:0">Obstacle deflection</label><span class="value" id="deflect-val">55</span></div>
+    <input type="range" id="deflect" min="0" max="100" step="1" value="55" />
+    <div class="hint" style="margin-top:6px">
+      Distance the obstacle's influence reaches. Arrows outside this reach follow the compass exactly.
+    </div>
+  </div>
+
+  <div class="section">
+    <label>Arrow glyph</label>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+      <button class="action" id="glyph-default" style="background:var(--accent);color:#000;font-weight:600;border-color:var(--accent);margin-top:0">Arrow</button>
+      <button class="action" id="glyph-logo" style="margin-top:0">Custom</button>
+    </div>
+    <label class="action" for="file-logo">Load logo (SVG / PNG)</label>
+    <input type="file" id="file-logo" accept="image/svg+xml,image/png,image/jpeg" />
+    <div class="hint">Draw the glyph pointing UP. It rotates with the flow.</div>
+  </div>
+
+  <div class="section">
+    <label>Colour</label>
+    <div class="swatch-row"><label>Arrow colour</label><input type="color" id="c-arrow" value="#000000"></div>
+    <div class="swatch-row"><label>Base background</label><input type="color" id="c-bg" value="#f2f2f0"></div>
+
+    <label style="margin-top:14px">Density → colour harmony</label>
+    <select id="harmony" style="width:100%;padding:6px;background:#111;color:#eee;border:1px solid var(--border);border-radius:3px;font:inherit">
+      <option value="none">None (flat background)</option>
+      <option value="mono">Monochrome (light → dark)</option>
+      <option value="analogous">Analogous (±30°)</option>
+      <option value="complementary">Complementary</option>
+      <option value="split">Split-complementary</option>
+      <option value="triad">Triadic</option>
+      <option value="tetrad">Tetradic</option>
+    </select>
+
+    <div class="row" style="margin-top:12px"><label style="margin:0">Harmony intensity</label><span class="value" id="harmony-int-val">70</span></div>
+    <input type="range" id="harmony-intensity" min="0" max="100" step="1" value="70" />
+    <div class="hint" style="margin-top:6px">Where the wind gets denser, the background shifts through the chosen harmony. Higher intensity = more colour.</div>
+  </div>
+
+  <div class="section">
+    <button class="action" id="reseed">Re-sample</button>
+    <button class="action" id="reset">Reset</button>
+  </div>
+
+  <div class="section">
+    <button class="action primary" id="export-svg">Export SVG</button>
+    <div id="meta"></div>
+  </div>
+</aside>
+
+<script>
+const SVG_NS = "http://www.w3.org/2000/svg";
+const XLINK_NS = "http://www.w3.org/1999/xlink";
+
+const canvas = document.getElementById("canvas");
+const canvasWrap = document.getElementById("canvas-wrap");
+
+let svgEl = null;
+let bgColorLayer = null;       // density-driven colour overlay
+let bgLayer = null;            // artboard background (for image mode)
+let elevationG = null;
+let arrowsG = null;
+let viewBox = { x: 0, y: 0, w: 1200, h: 800 };
+let seed = 1;
+let flow = null;               // { mask, dist, W, H }
+let windDirection = 270;       // meteorological "from" degrees
+let arrowStyle = "default";    // "default" | "logo"
+let logoSymbol = null;         // { id, w, h } when a custom glyph is loaded
+
+// -------- boot --------
+(async () => {
+  buildSvg();
+  document.getElementById("meta").textContent =
+    "Compass sets the base direction. Obstacles are read from the artboard's dark pixels.";
+  render();
+  requestAnimationFrame(() => requestAnimationFrame(fitToScreen));
+})();
+
+// -------- SVG scaffolding --------
+function buildSvg() {
+  svgEl = document.createElementNS(SVG_NS, "svg");
+  svgEl.setAttribute("viewBox", `${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`);
+  svgEl.setAttribute("xmlns", SVG_NS);
+  svgEl.setAttribute("preserveAspectRatio", "xMidYMid meet");
+
+  const defs = document.createElementNS(SVG_NS, "defs");
+  const marker = document.createElementNS(SVG_NS, "marker");
+  marker.setAttribute("id", "arrowhead");
+  marker.setAttribute("viewBox", "0 0 10 10");
+  marker.setAttribute("refX", "9");
+  marker.setAttribute("refY", "5");
+  marker.setAttribute("markerWidth", "3.5");
+  marker.setAttribute("markerHeight", "3.5");
+  marker.setAttribute("orient", "auto-start-reverse");
+  const mp = document.createElementNS(SVG_NS, "path");
+  mp.setAttribute("d", "M 0 0 L 10 5 L 0 10");
+  mp.setAttribute("fill", "none");
+  mp.setAttribute("stroke", "black");
+  mp.setAttribute("stroke-width", "1");
+  mp.setAttribute("stroke-linecap", "butt");
+  mp.setAttribute("stroke-linejoin", "miter");
+  mp.setAttribute("id", "arrowhead-path");
+  marker.appendChild(mp);
+  defs.appendChild(marker);
+  svgEl.appendChild(defs);
+
+  bgColorLayer = document.createElementNS(SVG_NS, "g");
+  bgColorLayer.setAttribute("id", "bg-color");
+  svgEl.appendChild(bgColorLayer);
+
+  bgLayer = document.createElementNS(SVG_NS, "g");
+  bgLayer.setAttribute("id", "bg-image");
+  svgEl.appendChild(bgLayer);
+
+  elevationG = document.createElementNS(SVG_NS, "g");
+  elevationG.setAttribute("id", "elevation");
+  svgEl.appendChild(elevationG);
+
+  arrowsG = document.createElementNS(SVG_NS, "g");
+  arrowsG.setAttribute("id", "arrows");
+  svgEl.appendChild(arrowsG);
+
+  canvas.appendChild(svgEl);
+}
+
+// -------- deterministic PRNG --------
+function mulberry32(a) {
+  return function() {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// -------- helpers --------
+function degToCardinal(deg) {
+  const dirs = ["N","NNE","NE","ENE","E","ESE","SE","SSE",
+                "S","SSW","SW","WSW","W","WNW","NW","NNW"];
+  return dirs[Math.round(deg / 22.5) % 16];
+}
+// Convert a "wind comes from" degree to a screen-space unit flow vector.
+// 0° (from N) → arrow points down (+y).  90° (from E) → arrow points left (-x).
+function fromDegToScreenVec(fromDeg) {
+  const rad = (fromDeg + 90) * Math.PI / 180;
+  return { x: Math.cos(rad), y: Math.sin(rad) };
+}
+
+// -------- colour utilities --------
+function hexToRgb(hex) {
+  hex = hex.replace("#", "");
+  if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+  return [parseInt(hex.slice(0,2),16), parseInt(hex.slice(2,4),16), parseInt(hex.slice(4,6),16)];
+}
+function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r,g,b), mn = Math.min(r,g,b);
+  let h = 0, s = 0, l = (mx + mn) / 2;
+  if (mx !== mn) {
+    const d = mx - mn;
+    s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+    switch (mx) {
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+      case g: h = (b - r) / d + 2; break;
+      case b: h = (r - g) / d + 4; break;
+    }
+    h *= 60;
+  }
+  return [h, s, l];
+}
+function hslToRgb(h, s, l) {
+  h = ((h % 360) + 360) % 360;
+  s = Math.max(0, Math.min(1, s));
+  l = Math.max(0, Math.min(1, l));
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  let r, g, b;
+  if (h < 60)      [r, g, b] = [c, x, 0];
+  else if (h < 120)[r, g, b] = [x, c, 0];
+  else if (h < 180)[r, g, b] = [0, c, x];
+  else if (h < 240)[r, g, b] = [0, x, c];
+  else if (h < 300)[r, g, b] = [x, 0, c];
+  else             [r, g, b] = [c, 0, x];
+  return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+}
+function harmonyStops(baseHex, kind) {
+  const [r0, g0, b0] = hexToRgb(baseHex);
+  const [h, s, l] = rgbToHsl(r0, g0, b0);
+  const at = (dh, ds = 0, dl = 0) =>
+    hslToRgb(h + dh, Math.max(0.15, Math.min(1, s + ds)), Math.max(0.1, Math.min(0.95, l + dl)));
+  const base = [r0, g0, b0];
+  switch (kind) {
+    case "mono":          return [base, at(0, 0, -0.35)];
+    case "analogous":     return [base, at(-30), at(30)];
+    case "complementary": return [base, at(180)];
+    case "split":         return [base, at(150), at(210)];
+    case "triad":         return [base, at(120), at(240)];
+    case "tetrad":        return [base, at(90), at(180), at(270)];
+    default:              return [base];
+  }
+}
+function interpPalette(stops, t) {
+  if (stops.length === 1) return stops[0];
+  const scaled = t * (stops.length - 1);
+  const i = Math.floor(scaled);
+  const f = scaled - i;
+  if (i >= stops.length - 1) return stops[stops.length - 1];
+  const a = stops[i], b = stops[i + 1];
+  return [
+    a[0] + (b[0] - a[0]) * f,
+    a[1] + (b[1] - a[1]) * f,
+    a[2] + (b[2] - a[2]) * f,
+  ];
+}
+
+// -------- custom logo (arrow glyph) --------
+async function loadLogo(file) {
+  const isSvg = file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg");
+  let sym = svgEl.querySelector("#user-logo");
+  if (sym) sym.remove();
+  sym = document.createElementNS(SVG_NS, "symbol");
+  sym.setAttribute("id", "user-logo");
+  sym.setAttribute("overflow", "visible");
+
+  let w, h;
+  if (isSvg) {
+    const text = await file.text();
+    const doc = new DOMParser().parseFromString(text, "image/svg+xml");
+    const src = doc.documentElement;
+    let vb = src.getAttribute("viewBox");
+    if (!vb) {
+      const sw = parseFloat(src.getAttribute("width")) || 100;
+      const sh = parseFloat(src.getAttribute("height")) || 100;
+      vb = `0 0 ${sw} ${sh}`;
+    }
+    const parts = vb.split(/[\s,]+/).map(parseFloat);
+    w = parts[2]; h = parts[3];
+    sym.setAttribute("viewBox", vb);
+    Array.from(src.children).forEach(c => sym.appendChild(c.cloneNode(true)));
+  } else {
+    const blob = new Blob([await file.arrayBuffer()], { type: file.type });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    w = img.naturalWidth; h = img.naturalHeight;
+    sym.setAttribute("viewBox", `0 0 ${w} ${h}`);
+    const imgEl = document.createElementNS(SVG_NS, "image");
+    imgEl.setAttribute("x", 0); imgEl.setAttribute("y", 0);
+    imgEl.setAttribute("width", w); imgEl.setAttribute("height", h);
+    imgEl.setAttributeNS(XLINK_NS, "xlink:href", url);
+    imgEl.setAttribute("href", url);
+    sym.appendChild(imgEl);
+  }
+  svgEl.querySelector("defs").appendChild(sym);
+  logoSymbol = { id: "user-logo", w, h };
+  setArrowStyle("logo");
+}
+
+function setArrowStyle(style) {
+  arrowStyle = style === "logo" && logoSymbol ? "logo" : "default";
+  document.getElementById("glyph-default").style.background =
+    arrowStyle === "default" ? "var(--accent)" : "transparent";
+  document.getElementById("glyph-default").style.color =
+    arrowStyle === "default" ? "#000" : "var(--ink)";
+  document.getElementById("glyph-default").style.borderColor =
+    arrowStyle === "default" ? "var(--accent)" : "var(--border)";
+  document.getElementById("glyph-logo").style.background =
+    arrowStyle === "logo" ? "var(--accent)" : "transparent";
+  document.getElementById("glyph-logo").style.color =
+    arrowStyle === "logo" ? "#000" : "var(--ink)";
+  document.getElementById("glyph-logo").style.borderColor =
+    arrowStyle === "logo" ? "var(--accent)" : "var(--border)";
+  render();
+}
+
+// -------- artboard loading --------
+async function loadArtboardFile(file) {
+  const isSvg = file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg");
+  if (isSvg) {
+    const text = await file.text();
+    await loadSvgArtboard(text);
+  } else {
+    await loadImageArtboard(file);
+  }
+}
+
+async function loadSvgArtboard(text) {
+  const doc = new DOMParser().parseFromString(text, "image/svg+xml");
+  const src = doc.documentElement;
+
+  let vb = src.getAttribute("viewBox");
+  if (!vb) {
+    const w = parseFloat(src.getAttribute("width")) || 1200;
+    const h = parseFloat(src.getAttribute("height")) || 800;
+    vb = `0 0 ${w} ${h}`;
+  }
+  const [vx, vy, vw, vh] = vb.split(/[\s,]+/).map(parseFloat);
+  viewBox = { x: vx, y: vy, w: vw, h: vh };
+  svgEl.setAttribute("viewBox", vb);
+
+  bgLayer.innerHTML = "";
+  elevationG.innerHTML = "";
+  Array.from(src.children).forEach(child => {
+    if (child.tagName.toLowerCase() === "defs") {
+      Array.from(child.children).forEach(d =>
+        svgEl.querySelector("defs").appendChild(d.cloneNode(true)));
+    } else {
+      elevationG.appendChild(child.cloneNode(true));
+    }
+  });
+  elevationG.style.pointerEvents = "none";
+
+  canvas.classList.add("has-elevation");
+  await computeFlowFieldFromSvg();
+  render();
+  fitToScreen();
+}
+
+async function loadImageArtboard(file) {
+  const blob = new Blob([await file.arrayBuffer()], { type: file.type });
+  const url = URL.createObjectURL(blob);
+  const img = new Image();
+  img.src = url;
+  await img.decode();
+
+  viewBox = { x: 0, y: 0, w: img.naturalWidth, h: img.naturalHeight };
+  svgEl.setAttribute("viewBox", `0 0 ${viewBox.w} ${viewBox.h}`);
+
+  elevationG.innerHTML = "";
+  bgLayer.innerHTML = "";
+  const imgEl = document.createElementNS(SVG_NS, "image");
+  imgEl.setAttribute("x", "0"); imgEl.setAttribute("y", "0");
+  imgEl.setAttribute("width", viewBox.w); imgEl.setAttribute("height", viewBox.h);
+  imgEl.setAttribute("preserveAspectRatio", "none");
+  imgEl.setAttributeNS(XLINK_NS, "xlink:href", url);
+  imgEl.setAttribute("href", url);
+  bgLayer.appendChild(imgEl);
+
+  await computeFlowFieldFromImage(img);
+  canvas.classList.add("has-elevation");
+  render();
+  fitToScreen();
+}
+
+// -------- obstacle mask (luminance threshold, black = obstacle) --------
+async function computeFlowFieldFromSvg() {
+  const long = 500;
+  const aspect = viewBox.w / viewBox.h;
+  const W = aspect >= 1 ? long : Math.round(long * aspect);
+  const H = aspect >= 1 ? Math.round(long / aspect) : long;
+
+  const rasterSvg =
+    `<svg xmlns="http://www.w3.org/2000/svg" ` +
+    `viewBox="${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}" ` +
+    `width="${W}" height="${H}">` +
+    // white background so unpainted area = flow
+    `<rect x="${viewBox.x}" y="${viewBox.y}" width="${viewBox.w}" ` +
+    `height="${viewBox.h}" fill="white"/>` +
+    elevationG.innerHTML +
+    `</svg>`;
+
+  const blob = new Blob([rasterSvg], { type: "image/svg+xml" });
+  const url = URL.createObjectURL(blob);
+  const img = new Image();
+  img.src = url;
+  try { await img.decode(); }
+  catch { URL.revokeObjectURL(url); flow = null; return; }
+  URL.revokeObjectURL(url);
+  buildMaskFromImage(img, W, H);
+}
+
+async function computeFlowFieldFromImage(img) {
+  const long = 500;
+  const aspect = img.naturalWidth / img.naturalHeight;
+  const W = aspect >= 1 ? long : Math.round(long * aspect);
+  const H = aspect >= 1 ? Math.round(long / aspect) : long;
+  buildMaskFromImage(img, W, H);
+}
+
+function buildMaskFromImage(img, W, H) {
+  const off = document.createElement("canvas");
+  off.width = W; off.height = H;
+  const ctx = off.getContext("2d");
+  ctx.fillStyle = "white";                 // background = flow area
+  ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(img, 0, 0, W, H);
+  const data = ctx.getImageData(0, 0, W, H).data;
+
+  // Continuous obstacle weight: 0 = pure white / transparent, 1 = pure black.
+  const weight = new Float32Array(W * H);
+  const mask   = new Uint8Array(W * H);
+  for (let i = 0, j = 0; j < weight.length; i += 4, j++) {
+    const lum = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+    const a = data[i+3] / 255;
+    const w = a * (1 - lum / 255);
+    weight[j] = w;
+    // Any non-trivial obstacle darkness counts for the distance transform.
+    mask[j] = w > 0.15 ? 1 : 0;
+  }
+  const dist = distanceTransform(mask, W, H);
+  flow = { weight, mask, dist, W, H };
+}
+
+// Two-pass Chamfer 3-4 distance transform → Euclidean-close, single-pixel accurate.
+function distanceTransform(mask, W, H) {
+  const INF = 1e9, D1 = 1, D2 = Math.SQRT2;
+  const d = new Float32Array(W * H);
+  for (let i = 0; i < mask.length; i++) d[i] = mask[i] ? 0 : INF;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x;
+    let v = d[i];
+    if (x > 0)              v = Math.min(v, d[i - 1] + D1);
+    if (y > 0)              v = Math.min(v, d[i - W] + D1);
+    if (x > 0 && y > 0)     v = Math.min(v, d[i - W - 1] + D2);
+    if (x < W - 1 && y > 0) v = Math.min(v, d[i - W + 1] + D2);
+    d[i] = v;
+  }
+  for (let y = H - 1; y >= 0; y--) for (let x = W - 1; x >= 0; x--) {
+    const i = y * W + x;
+    let v = d[i];
+    if (x < W - 1)              v = Math.min(v, d[i + 1] + D1);
+    if (y < H - 1)              v = Math.min(v, d[i + W] + D1);
+    if (x > 0 && y < H - 1)     v = Math.min(v, d[i + W - 1] + D2);
+    if (x < W - 1 && y < H - 1) v = Math.min(v, d[i + W + 1] + D2);
+    d[i] = v;
+  }
+  return d;
+}
+
+// Separable box blur — used to soften the density map for a clean gradient.
+function boxBlur(src, W, H, r) {
+  if (r < 1) return new Float32Array(src);
+  const tmp = new Float32Array(W * H);
+  const out = new Float32Array(W * H);
+  const inv = 1 / (2 * r + 1);
+  for (let y = 0; y < H; y++) {
+    let sum = 0;
+    for (let x = -r; x <= r; x++) sum += src[y * W + Math.max(0, Math.min(W - 1, x))];
+    for (let x = 0; x < W; x++) {
+      tmp[y * W + x] = sum * inv;
+      sum -= src[y * W + Math.max(0, x - r)];
+      sum += src[y * W + Math.min(W - 1, x + r + 1)];
+    }
+  }
+  for (let x = 0; x < W; x++) {
+    let sum = 0;
+    for (let y = -r; y <= r; y++) sum += tmp[Math.max(0, Math.min(H - 1, y)) * W + x];
+    for (let y = 0; y < H; y++) {
+      out[y * W + x] = sum * inv;
+      sum -= tmp[Math.max(0, y - r) * W + x];
+      sum += tmp[Math.min(H - 1, y + r + 1) * W + x];
+    }
+  }
+  return out;
+}
+
+function renderColorBg() {
+  const harmony = document.getElementById("harmony").value;
+  const baseHex = document.getElementById("c-bg").value;
+  const intensity = +document.getElementById("harmony-intensity").value / 100;
+  document.getElementById("harmony-int-val").textContent =
+    document.getElementById("harmony-intensity").value;
+
+  if (!bgColorLayer) return;
+
+  // Solid base always sits behind the SVG through CSS.
+  canvas.style.background = baseHex;
+  svgEl.style.background = baseHex;
+
+  if (harmony === "none" || intensity === 0 || !flow) {
+    bgColorLayer.innerHTML = "";
+    return;
+  }
+
+  const { dist, weight, W, H } = flow;
+  const long = Math.max(W, H);
+  const RANGE = long * 0.35;                       // reach for the halo
+  const raw = new Float32Array(W * H);
+  for (let i = 0; i < W * H; i++) {
+    const d = dist[i];
+    // 0 far from anything, 1 right at the boundary; smooth curve
+    let v = d < RANGE ? 1 - d / RANGE : 0;
+    v = v * v;
+    if (weight[i] > 0.65) v = 1;                   // inside a solid
+    raw[i] = v;
+  }
+  const smooth = boxBlur(raw, W, H, Math.max(2, Math.round(long * 0.02)));
+
+  const stops = harmonyStops(baseHex, harmony);
+  const [rB, gB, bB] = hexToRgb(baseHex);
+
+  const off = document.createElement("canvas");
+  off.width = W; off.height = H;
+  const ctx = off.getContext("2d");
+  const img = ctx.createImageData(W, H);
+  for (let i = 0, j = 0; i < W * H; i++, j += 4) {
+    const t = smooth[i];                            // 0..1 density
+    const [r, g, b] = interpPalette(stops, t);
+    // Colour blend: interpolate from the base towards the harmony colour,
+    // scaled by the intensity slider. Always fully opaque so the whole
+    // artboard shows the density map.
+    img.data[j]     = rB + (r - rB) * intensity;
+    img.data[j + 1] = gB + (g - gB) * intensity;
+    img.data[j + 2] = bB + (b - bB) * intensity;
+    img.data[j + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+
+  bgColorLayer.innerHTML =
+    `<image x="${viewBox.x}" y="${viewBox.y}" ` +
+    `width="${viewBox.w}" height="${viewBox.h}" ` +
+    `preserveAspectRatio="none" href="${off.toDataURL()}"/>`;
+}
+
+function sampleFlow(px, py, baseX, baseY) {
+  if (!flow) return { wx: baseX, wy: baseY, alpha: 1, inside: false };
+  const { weight, dist, W, H } = flow;
+
+  const fx = (px - viewBox.x) / viewBox.w * W;
+  const fy = (py - viewBox.y) / viewBox.h * H;
+  const ix = Math.max(0, Math.min(W - 1, Math.round(fx)));
+  const iy = Math.max(0, Math.min(H - 1, Math.round(fy)));
+  const i0 = iy * W + ix;
+  const w0 = weight[i0];
+
+  // > 65% dark = solid: no arrow drawn here.
+  if (w0 > 0.65) return { wx: 0, wy: 0, alpha: 0, inside: true };
+
+  // Slight fade in dark grays so opacity mirrors "less wind here".
+  const alpha = 1 - w0 * 0.85;
+
+  // Deflection reach in mask pixels — driven by slider.
+  const long = Math.max(W, H);
+  const deflect = +document.getElementById("deflect").value;
+  const range = deflect / 100 * long * 0.4;
+
+  const d = dist[i0];
+  // Far from any obstacle → pure compass direction. Guaranteed.
+  if (range <= 0 || d >= range) {
+    return { wx: baseX, wy: baseY, alpha, inside: false };
+  }
+
+  // Gradient of the distance field: points AWAY from the nearest obstacle.
+  const ixm = Math.max(0, ix - 1), ixp = Math.min(W - 1, ix + 1);
+  const iym = Math.max(0, iy - 1), iyp = Math.min(H - 1, iy + 1);
+  const gx = dist[iy * W + ixp] - dist[iy * W + ixm];
+  const gy = dist[iyp * W + ix] - dist[iym * W + ix];
+  const glen = Math.hypot(gx, gy);
+  if (glen < 1e-6) return { wx: baseX, wy: baseY, alpha, inside: false };
+
+  const gxn = gx / glen, gyn = gy / glen;
+  // Tangent = perpendicular to gradient (parallel to obstacle boundary).
+  // Choose the sign that agrees with the compass direction.
+  let tx = -gyn, ty = gxn;
+  if (tx * baseX + ty * baseY < 0) { tx = -tx; ty = -ty; }
+
+  // Smooth falloff: 1 at the boundary, 0 at 'range'. Cosine keeps it soft.
+  const t = 1 - d / range;
+  const influence = t * t;
+
+  const rx = baseX * (1 - influence) + tx * influence;
+  const ry = baseY * (1 - influence) + ty * influence;
+  const rlen = Math.hypot(rx, ry) || 1;
+  return { wx: rx / rlen, wy: ry / rlen, alpha, inside: false };
+}
+
+// -------- render --------
+function render() {
+  if (!svgEl) return;
+
+  const density  = +document.getElementById("density").value;
+  const size     = +document.getElementById("size").value;
+  const stroke   = +document.getElementById("stroke").value / 10;   // 0.1 – 12 in viewBox units
+  const deflect  = +document.getElementById("deflect").value;
+  const arrowC   = document.getElementById("c-arrow").value;
+  const bgC      = document.getElementById("c-bg").value;
+
+  document.getElementById("density-val").textContent = density;
+  document.getElementById("size-val").textContent = size;
+  document.getElementById("stroke-val").textContent = stroke.toFixed(1);
+  document.getElementById("deflect-val").textContent = deflect;
+
+  const arrowHead = svgEl.querySelector("#arrowhead-path");
+  if (arrowHead) arrowHead.setAttribute("stroke", arrowC);
+  renderColorBg();
+
+  const rand = mulberry32(seed);
+  const points = generateArrowPoints(density, rand);
+
+  const base = fromDegToScreenVec(windDirection);
+
+  const useLogo = arrowStyle === "logo" && logoSymbol;
+  const logoScale = useLogo ? size / logoSymbol.h : 1;
+  const logoOffX = useLogo ? -logoSymbol.w / 2 : 0;
+  const logoOffY = useLogo ? -logoSymbol.h / 2 : 0;
+
+  let svgFrag = "";
+  for (let p = 0; p < points.length; p++) {
+    const cx = points[p].x, cy = points[p].y;
+    const f = sampleFlow(cx, cy, base.x, base.y);
+    if (f.inside) continue;
+
+    const op = f.alpha < 0.99 ? ` opacity="${f.alpha.toFixed(2)}"` : "";
+
+    if (useLogo) {
+      // rotation so the logo's "up" (y-negative) aligns with the flow vector
+      const rotDeg = (Math.atan2(f.wx, -f.wy) * 180 / Math.PI).toFixed(1);
+      svgFrag +=
+        `<use href="#user-logo" ` +
+        `transform="translate(${cx.toFixed(1)} ${cy.toFixed(1)}) ` +
+        `rotate(${rotDeg}) scale(${logoScale.toFixed(3)}) ` +
+        `translate(${logoOffX} ${logoOffY})"${op}/>`;
+    } else {
+      // arrow drawn as one path — shaft + V — so head geometry scales with
+      // the size slider independently of stroke thickness.
+      const half = size * 0.5;
+      const headLen = size * 0.22;        // depth of V behind the tip
+      const headHalfW = size * 0.11;      // half-spread of V wings
+      const flowX = f.wx, flowY = f.wy;
+      const perpX = -flowY, perpY = flowX;
+
+      const tailX = cx - flowX * half;
+      const tailY = cy - flowY * half;
+      const tipX  = cx + flowX * half;
+      const tipY  = cy + flowY * half;
+      const wingBaseX = tipX - flowX * headLen;
+      const wingBaseY = tipY - flowY * headLen;
+      const w1X = wingBaseX + perpX * headHalfW;
+      const w1Y = wingBaseY + perpY * headHalfW;
+      const w2X = wingBaseX - perpX * headHalfW;
+      const w2Y = wingBaseY - perpY * headHalfW;
+
+      const d =
+        `M${tailX.toFixed(1)} ${tailY.toFixed(1)}L${tipX.toFixed(1)} ${tipY.toFixed(1)}` +
+        `M${w1X.toFixed(1)} ${w1Y.toFixed(1)}L${tipX.toFixed(1)} ${tipY.toFixed(1)}L${w2X.toFixed(1)} ${w2Y.toFixed(1)}`;
+      svgFrag +=
+        `<path d="${d}" fill="none" stroke="${arrowC}" ` +
+        `stroke-width="${stroke}"${op} stroke-linecap="butt" stroke-linejoin="miter"/>`;
+    }
+  }
+  arrowsG.innerHTML = svgFrag;
+}
+
+// Importance-sampled point placement.  With no artboard, arrows land on a
+// jittered grid.  With an artboard, extra arrows cluster near obstacles —
+// so the density of the pattern itself telegraphs the flow.
+function generateArrowPoints(N, rand) {
+  const pts = [];
+
+  if (!flow) {
+    const aspect = viewBox.w / viewBox.h;
+    const cols = Math.max(1, Math.round(Math.sqrt(N * aspect)));
+    const rows = Math.max(1, Math.round(N / cols));
+    const cellW = viewBox.w / cols;
+    const cellH = viewBox.h / rows;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const jx = (rand() - 0.5) * cellW * 0.6;
+        const jy = (rand() - 0.5) * cellH * 0.6;
+        pts.push({
+          x: (c + 0.5) * cellW + jx + viewBox.x,
+          y: (r + 0.5) * cellH + jy + viewBox.y,
+        });
+      }
+    }
+    return pts;
+  }
+
+  const { weight, dist, W, H } = flow;
+  const cellW = viewBox.w / W;
+  const cellH = viewBox.h / H;
+
+  // Importance = baseline in open air, boosted where the arrow is near an
+  // obstacle. Uses inverse-distance so the "packing" tightens right next to
+  // walls and edges. Suppressed inside solid regions.
+  const long = Math.max(W, H);
+  const BOOST_RANGE = long * 0.12;   // arrows crowd within this pixel radius
+  const BOOST_MAX = 3.5;             // peak density multiplier at the edge
+  let totalImp = 0;
+  const imp = new Float32Array(W * H);
+  for (let i = 0; i < W * H; i++) {
+    if (weight[i] > 0.65) { imp[i] = 0; continue; }
+    const d = dist[i];
+    const boost = d < BOOST_RANGE
+      ? 1 + BOOST_MAX * (1 - d / BOOST_RANGE) * (1 - d / BOOST_RANGE)
+      : 1;
+    imp[i] = boost;
+    totalImp += imp[i];
+  }
+  if (totalImp === 0) return pts;
+
+  // Stochastic-round expected-count per cell → total ≈ N arrows.
+  const scale = N / totalImp;
+  for (let i = 0; i < imp.length; i++) {
+    const expected = imp[i] * scale;
+    if (expected < 0.001) continue;
+    const count = Math.floor(expected + rand());
+    if (count === 0) continue;
+    const cx = i % W, cy = (i / W) | 0;
+    for (let k = 0; k < count; k++) {
+      pts.push({
+        x: (cx + rand()) * cellW + viewBox.x,
+        y: (cy + rand()) * cellH + viewBox.y,
+      });
+    }
+  }
+  return pts;
+}
+
+// -------- compass interaction --------
+const compassEl = document.getElementById("compass");
+const compassNeedle = document.getElementById("compass-needle");
+const compassDeg = document.getElementById("compass-deg");
+const compassCard = document.getElementById("compass-card");
+
+function setWindDirection(deg) {
+  deg = ((deg % 360) + 360) % 360;
+  windDirection = deg;
+  // needle points where wind comes FROM, so rotate to that angle.
+  compassNeedle.setAttribute("transform", `rotate(${deg})`);
+  compassDeg.textContent = Math.round(deg) + "°";
+  compassCard.textContent = "from " + degToCardinal(deg);
+  render();
+}
+
+let compassDragging = false;
+function angleFromCompass(evt) {
+  const rect = compassEl.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  const dx = evt.clientX - cx;
+  const dy = evt.clientY - cy;
+  // screen: 0° up, 90° right, 180° down, 270° left  → atan2 mapping
+  let deg = Math.atan2(dx, -dy) * 180 / Math.PI;
+  if (deg < 0) deg += 360;
+  return deg;
+}
+compassEl.addEventListener("mousedown", e => {
+  compassDragging = true;
+  compassEl.classList.add("dragging");
+  setWindDirection(angleFromCompass(e));
+  e.preventDefault();
+});
+window.addEventListener("mousemove", e => {
+  if (compassDragging) setWindDirection(angleFromCompass(e));
+});
+window.addEventListener("mouseup", () => {
+  compassDragging = false;
+  compassEl.classList.remove("dragging");
+});
+// -------- file input --------
+document.getElementById("file-elev").addEventListener("change", async e => {
+  const f = e.target.files[0];
+  if (f) await loadArtboardFile(f);
+});
+document.getElementById("clear-elev").addEventListener("click", () => {
+  bgLayer.innerHTML = "";
+  elevationG.innerHTML = "";
+  viewBox = { x: 0, y: 0, w: 1200, h: 800 };
+  svgEl.setAttribute("viewBox", `0 0 ${viewBox.w} ${viewBox.h}`);
+  canvas.classList.remove("has-elevation");
+  flow = null;
+  render();
+  fitToScreen();
+});
+
+["dragenter","dragover"].forEach(evt =>
+  canvasWrap.addEventListener(evt, e => {
+    e.preventDefault();
+    document.body.classList.add("drag-over");
+  }));
+["dragleave","drop"].forEach(evt =>
+  canvasWrap.addEventListener(evt, e => {
+    e.preventDefault();
+    document.body.classList.remove("drag-over");
+  }));
+canvasWrap.addEventListener("drop", async e => {
+  const f = e.dataTransfer.files[0];
+  if (f) await loadArtboardFile(f);
+});
+
+// -------- control listeners --------
+["density","size","stroke","deflect","c-arrow","c-bg","harmony","harmony-intensity"]
+  .forEach(id => document.getElementById(id).addEventListener("input", render));
+document.getElementById("harmony").addEventListener("change", render);
+
+document.getElementById("glyph-default").addEventListener("click", () => setArrowStyle("default"));
+document.getElementById("glyph-logo").addEventListener("click", () => setArrowStyle("logo"));
+document.getElementById("file-logo").addEventListener("change", async e => {
+  const f = e.target.files[0];
+  if (f) await loadLogo(f);
+});
+document.getElementById("reseed").addEventListener("click", () => {
+  seed = Math.floor(Math.random() * 1e9);
+  render();
+});
+document.getElementById("reset").addEventListener("click", () => {
+  const set = (id, v) => document.getElementById(id).value = v;
+  set("density", 6000); set("size", 18); set("stroke", 15);
+  set("deflect", 55);
+  set("c-arrow", "#000000"); set("c-bg", "#f2f2f0");
+  set("harmony", "none"); set("harmony-intensity", 70);
+  seed = 1;
+  setWindDirection(270);
+});
+
+// -------- export --------
+document.getElementById("export-svg").addEventListener("click", () => {
+  const clone = svgEl.cloneNode(true);
+  clone.setAttribute("xmlns", SVG_NS);
+  clone.setAttribute("xmlns:xlink", XLINK_NS);
+  clone.style.background = document.getElementById("c-bg").value;
+  const bg = document.createElementNS(SVG_NS, "rect");
+  bg.setAttribute("x", viewBox.x); bg.setAttribute("y", viewBox.y);
+  bg.setAttribute("width", viewBox.w); bg.setAttribute("height", viewBox.h);
+  bg.setAttribute("fill", document.getElementById("c-bg").value);
+  clone.insertBefore(bg, clone.firstChild.nextSibling);
+  const source = new XMLSerializer().serializeToString(clone);
+  const blob = new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n', source],
+                        { type: "image/svg+xml" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `munich_wind_${Math.round(windDirection)}deg_${Date.now()}.svg`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+// -------- zoom & pan --------
+let currentZoom = 1;
+let naturalW = 900;
+const zoomValEl = document.getElementById("zoom-val");
+function applyZoom() {
+  canvas.style.setProperty("--zoom-width", (naturalW * currentZoom) + "px");
+  zoomValEl.textContent = Math.round(currentZoom * 100) + "%";
+}
+function fitToScreen() {
+  if (!svgEl) return;
+  const aspect = viewBox.w / viewBox.h;
+  const availW = Math.max(400, canvasWrap.clientWidth - 48);
+  const availH = Math.max(400, canvasWrap.clientHeight - 48);
+  naturalW = Math.max(300, Math.min(availH * aspect, availW));
+  currentZoom = 1;
+  applyZoom();
+}
+document.getElementById("zoom-in").addEventListener("click", () => {
+  currentZoom = Math.min(8, currentZoom * 1.25); applyZoom();
+});
+document.getElementById("zoom-out").addEventListener("click", () => {
+  currentZoom = Math.max(0.2, currentZoom / 1.25); applyZoom();
+});
+document.getElementById("zoom-fit").addEventListener("click", fitToScreen);
+document.getElementById("zoom-100").addEventListener("click", () => {
+  naturalW = viewBox.w; currentZoom = 1; applyZoom();
+});
+canvasWrap.addEventListener("wheel", e => {
+  e.preventDefault();
+  const rect = canvasWrap.getBoundingClientRect();
+  const cx = e.clientX - rect.left + canvasWrap.scrollLeft;
+  const cy = e.clientY - rect.top  + canvasWrap.scrollTop;
+  const before = currentZoom;
+  const delta = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+  currentZoom = Math.max(0.2, Math.min(8, currentZoom * delta));
+  applyZoom();
+  const ratio = currentZoom / before;
+  canvasWrap.scrollLeft = cx * ratio - (e.clientX - rect.left);
+  canvasWrap.scrollTop  = cy * ratio - (e.clientY - rect.top);
+}, { passive: false });
+
+let pan = null;
+canvasWrap.addEventListener("mousedown", e => {
+  if (e.button !== 0) return;
+  // don't start a pan when the user clicks on the compass
+  if (e.target.closest("#zoom-toolbar")) return;
+  pan = { x: e.clientX, y: e.clientY,
+          sl: canvasWrap.scrollLeft, st: canvasWrap.scrollTop };
+  canvasWrap.classList.add("dragging");
+});
+window.addEventListener("mousemove", e => {
+  if (!pan) return;
+  canvasWrap.scrollLeft = pan.sl - (e.clientX - pan.x);
+  canvasWrap.scrollTop  = pan.st - (e.clientY - pan.y);
+});
+window.addEventListener("mouseup", () => {
+  pan = null;
+  canvasWrap.classList.remove("dragging");
+});
+window.addEventListener("resize", () => svgEl && fitToScreen());
+</script>
+</body>
+</html>
